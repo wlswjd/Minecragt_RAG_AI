@@ -4,10 +4,10 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 
-# 1. 환경 변수 로드 (.env 파일의 GOOGLE_API_KEY 인식)
+# 1. 환경 변수 로드
 load_dotenv()
 
 # 2. API 요청 및 HTML 파싱
@@ -39,15 +39,18 @@ if crafting_table:
 
 print(f"문서 {len(langchain_documents)}개 추출 및 객체 변환 완료.")
 
-# 4. 임베딩 모델 설정 (Google Gemini API)
-# models/embedding-001 모델을 사용하여 텍스트를 벡터로 변환합니다.
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+# 4. 임베딩 모델 설정 (로컬 한국어 특화 모델)
+print("\n--- 로컬 임베딩 모델 로드 중 (최초 실행 시 모델 다운로드에 약간의 시간이 소요됩니다) ---")
+embeddings = HuggingFaceEmbeddings(
+    model_name="jhgan/ko-sroberta-multitask",
+    model_kwargs={'device': 'cpu'}, # Mac 환경에 맞춰 CPU 사용 (Apple Silicon의 경우 'mps' 활용 가능하나 안정성을 위해 우선 cpu 설정)
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 # 5. Chroma 벡터 DB 구축 및 로컬 저장
-print("\n--- 벡터 DB 구축 및 저장 시작 ---")
+print("--- 벡터 DB 구축 및 저장 시작 ---")
 persist_dir = "./chroma_db"
 
-# 기존에 동일한 이름의 DB가 있다면 덮어쓰거나 추가합니다.
 vectorstore = Chroma.from_documents(
     documents=langchain_documents,
     embedding=embeddings,
@@ -60,7 +63,6 @@ query = "구리로 곡괭이를 어떻게 만들어?"
 print(f"\n--- 검색 테스트 ---")
 print(f"사용자 질문: {query}")
 
-# k=1 파라미터는 질문과 의미적으로 가장 유사한 문서 1개만 가져오라는 의미입니다.
 retrieved_docs = vectorstore.similarity_search(query, k=1)
 
 for i, doc in enumerate(retrieved_docs):
