@@ -34,6 +34,10 @@ prompt_template = """
 아래 제공된 [Context]만을 사용하여 사용자의 [Question]에 답변하십시오.
 Context에 없는 내용은 절대 추측해서 답변하지 마십시오.
 
+조합법을 설명할 때 [Context]에 [1번칸:아이템명] 같은 3x3 제작 배치도 정보가 있다면,
+반드시 '제작대 3x3 칸 기준'으로 위치를 명확히 설명해주세요.
+(예: 1번칸(왼쪽 위)에는 참나무 판자, 2번칸(가운데 위)에는 철 주괴...)
+
 [Context]
 {context}
 
@@ -61,9 +65,9 @@ if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이
     # RAG 파이프라인 가동 및 응답 출력
     with st.chat_message("assistant"):
         with st.spinner("위키 DB를 검색 중입니다..."):
-            # 벡터 DB 검색
-            retrieved_docs = vectorstore.similarity_search(user_query, k=1)
-            context_text = retrieved_docs[0].page_content if retrieved_docs else "관련 정보를 찾을 수 없습니다."
+            # 벡터 DB 검색 (k=3으로 확장)
+            retrieved_docs = vectorstore.similarity_search(user_query, k=3)
+            context_text = "\n\n".join([doc.page_content for doc in retrieved_docs]) if retrieved_docs else "관련 정보를 찾을 수 없습니다."
             
             # 프롬프트 조립 및 LLM 요청
             final_prompt = prompt.format(context=context_text, question=user_query)
