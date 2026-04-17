@@ -7,15 +7,32 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 
-# 1. 환경 변수 로드
+# 환경 변수 로드
 load_dotenv()
 
-# 2. 웹 UI 기본 설정
-st.set_page_config(page_title="Minecraft RAG Guide", page_icon="⛏️")
-st.title("⛏️ 마인크래프트 지능형 가이드")
-st.markdown("로컬 마인크래프트 위키 데이터를 활용한 RAG 챗봇입니다.")
+# 웹 UI 기본 설정
+st.set_page_config(page_title="Minecraft RAG Guide", page_icon="마크로고.webp")
 
-# 3. 모델 및 벡터 DB 로드 (캐싱을 통해 최초 1회만 로드)
+# 로고와 타이틀을 나란히 배치
+col1, col2 = st.columns([1, 8])
+with col1:
+    st.image("마크로고.webp", width=60)
+with col2:
+    st.title("마인크래프트 지능형 가이드")
+
+st.markdown("로컬 마인크래프트 위키 데이터를 활용한 RAG 챗봇임.")
+
+# 사이드바 추가 (기능 및 디자인 다듬기)
+with st.sidebar:
+    st.markdown("### ⚙️ 챗봇 설정")
+    if st.button("대화 초기화", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+    st.markdown("---")
+    st.markdown("**데이터 소스:**\n- 마인크래프트 공식 위키\n- 나무위키 (팁/글리치)")
+    st.markdown("**AI 모델:**\n- Google Gemini 2.5 Flash")
+
+# 모델 및 벡터 DB 로드 (캐싱 적용)
 @st.cache_resource
 def load_rag_components():
     embeddings = HuggingFaceEmbeddings(
@@ -29,7 +46,7 @@ def load_rag_components():
 
 vectorstore, llm = load_rag_components()
 
-# 4. 프롬프트 템플릿 설정 (경량화된 기록 인지)
+# 프롬프트 템플릿 설정
 qa_system_prompt = """당신은 마인크래프트(Minecraft) 게임의 최고 전문가이자 친절한 지능형 가이드 챗봇입니다.
 아래 제공된 [Context] 정보와 [대화 기록]을 참고하여 사용자의 질문에 답변하십시오.
 
@@ -53,18 +70,18 @@ qa_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-# 5. 세션 상태(Session State)를 이용한 대화 기록 관리
+# 세션 상태 기반 대화 기록 관리
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 이전 대화 기록을 화면에 출력
+# 이전 대화 기록 화면 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 6. 사용자 입력 및 챗봇 응답 처리
+# 사용자 입력 및 챗봇 응답 처리
 if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)"):
-    # 사용자의 질문을 화면에 표시하고 기록에 저장
+    # 사용자 질문 화면 표시 및 기록 저장
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
         st.markdown(user_query)
@@ -75,7 +92,7 @@ if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이
     for msg in st.session_state.messages[:-1]:
         if msg["role"] == "user":
             chat_history.append(HumanMessage(content=msg["content"]))
-            prev_user_query = msg["content"] # 가장 마지막 이전 질문 저장
+            prev_user_query = msg["content"] # 마지막 이전 질문 저장
         else:
             chat_history.append(AIMessage(content=msg["content"]))
 
@@ -84,14 +101,13 @@ if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이
         message_placeholder = st.empty()
         full_response = ""
         
-        with st.spinner("위키 DB를 검색 중입니다..."):
-            # 💡 유저의 날카로운 지적 반영: 이전 질문을 무조건 합치면 주제 전환 시 검색이 꼬임!
-            # 따라서 검색(Retrieval)은 오직 '현재 질문'으로만 수행하여 주제 전환에 완벽히 대응합니다.
-            # 대명사 생략 질문("체력은?")은 LLM이 '이전 대화 기록(chat_history)'을 읽고 문맥을 파악하여 답변합니다.
+        with st.spinner("위키 DB 검색 중..."):
+            # 검색(Retrieval)은 현재 질문으로만 수행하여 주제 전환에 대응함.
+            # 대명사 생략 질문은 LLM이 대화 기록을 읽고 문맥을 파악하여 답변함.
             retrieved_docs = vectorstore.similarity_search(user_query, k=5)
             context_text = "\n\n".join([doc.page_content for doc in retrieved_docs]) if retrieved_docs else "관련 정보를 찾을 수 없습니다."
             
-            # 체인 조립 및 스트리밍 실행 (API 호출 1회로 감소 유지)
+            # 체인 조립 및 스트리밍 실행 (API 호출 1회)
             chain = qa_prompt | llm
             for chunk in chain.stream({
                 "context": context_text,
@@ -101,6 +117,6 @@ if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이
                 full_response += chunk.content
                 message_placeholder.markdown(full_response + "▌")
         
-        # 최종 응답 출력 및 기록 저장 (커서 제거)
+        # 최종 응답 출력 및 기록 저장
         message_placeholder.markdown(full_response)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
