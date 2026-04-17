@@ -13,8 +13,38 @@ from langchain_core.messages import HumanMessage, AIMessage
 # 환경 변수 로드
 load_dotenv()
 
-# 웹 UI 기본 설정
+# 웹 UI 기본 설정 및 커스텀 CSS (모던 디자인)
 st.set_page_config(page_title="Minecraft RAG Guide", page_icon="마크로고.webp")
+
+st.markdown("""
+<style>
+/* 유저 메시지 (왼쪽 정렬, 파란빛 배경) */
+[data-testid="chat-message-user"] {
+    background-color: #1e2532;
+    border-radius: 15px;
+    padding: 10px 15px;
+    margin: 10px 0;
+    border-left: 4px solid #3b82f6;
+}
+
+/* AI 메시지 (오른쪽 정렬, 어두운 회색 배경) */
+[data-testid="chat-message-assistant"] {
+    background-color: #2b313e;
+    border-radius: 15px;
+    padding: 10px 15px;
+    margin: 10px 0;
+    flex-direction: row-reverse;
+    text-align: right;
+    border-right: 4px solid #10b981;
+}
+
+/* AI 아바타 여백 조정 (오른쪽 정렬 시 아바타 위치 보정) */
+[data-testid="chat-message-assistant"] div[data-testid="chat-avatar-assistant"] {
+    margin-left: 1rem;
+    margin-right: 0;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # 로고와 타이틀을 나란히 배치
 col1, col2 = st.columns([1, 8])
@@ -23,7 +53,7 @@ with col1:
 with col2:
     st.title("마인크래프트 지능형 가이드")
 
-st.markdown("로컬 마인크래프트 위키 데이터를 활용한 RAG 챗봇임.")
+st.markdown("**마인크래프트 공식 위키와 커뮤니티의 꿀팁들을 모두 모아, 게임 플레이 중 궁금한 점을 빠르고 정확하게 알려드리는 지능형 RAG 챗봇입니다. 무엇이든 물어보세요!**")
 
 # 사이드바 추가 (기능 및 디자인 다듬기)
 with st.sidebar:
@@ -31,9 +61,21 @@ with st.sidebar:
     if st.button("대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
+    
+    # 빈 공간을 만들어 하단으로 밀어내기
+    st.markdown("<br>" * 15, unsafe_allow_html=True)
     st.markdown("---")
-    st.markdown("**데이터 소스:**\n- 마인크래프트 공식 위키\n- 나무위키 (팁/글리치)")
-    st.markdown("**AI 모델:**\n- Google Gemini 2.5 Flash")
+    
+    # 폰트 크기를 줄여서 하단에 배치
+    st.markdown("""
+    <div style='font-size: 0.8em; color: #a0a0a0;'>
+    <b>데이터 소스:</b><br>
+    - 마인크래프트 공식 위키<br>
+    - 나무위키 (팁/글리치)<br><br>
+    <b>AI 모델:</b><br>
+    - Google Gemini 2.5 Flash
+    </div>
+    """, unsafe_allow_html=True)
 
 # 모델 및 벡터 DB 로드 (캐싱 적용)
 @st.cache_resource
