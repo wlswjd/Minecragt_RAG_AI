@@ -21,30 +21,6 @@ st.set_page_config(page_title="Minecraft RAG Guide", page_icon="마크로고.web
 
 st.markdown("""
 <style>
-/* 유저 메시지 컨테이너 (오른쪽 정렬, 파란빛 배경) */
-div[data-testid="stChatMessage"]:has(.user-msg) {
-    flex-direction: row-reverse;
-    background-color: #1e2532;
-    border-radius: 15px;
-    padding: 10px 15px;
-    margin: 10px 0;
-    border-right: 4px solid #3b82f6;
-}
-/* 유저 아바타 여백 조정 */
-div[data-testid="stChatMessage"]:has(.user-msg) div[data-testid="stChatAvatar"] {
-    margin-left: 1rem;
-    margin-right: 0;
-}
-
-/* AI 메시지 컨테이너 (왼쪽 정렬, 어두운 회색 배경) */
-div[data-testid="stChatMessage"]:has(.ai-msg) {
-    background-color: #2b313e;
-    border-radius: 15px;
-    padding: 10px 15px;
-    margin: 10px 0;
-    border-left: 4px solid #10b981;
-}
-
 /* 사이드바 하단 고정 텍스트 */
 [data-testid="stSidebar"] {
     position: relative;
@@ -135,17 +111,14 @@ if "messages" not in st.session_state:
 # 이전 대화 기록 화면 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        if message["role"] == "user":
-            st.markdown(f"<span class='user-msg'></span>{message['content']}", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<span class='ai-msg'></span>{message['content']}", unsafe_allow_html=True)
+        st.markdown(message["content"])
 
 # 사용자 입력 및 챗봇 응답 처리
 if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)"):
     # 사용자 질문 화면 표시 및 기록 저장
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
-        st.markdown(f"<span class='user-msg'></span>{user_query}", unsafe_allow_html=True)
+        st.markdown(user_query)
 
     # LangChain용 대화 기록 변환 및 이전 질문 추출
     chat_history = []
@@ -176,8 +149,8 @@ if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이
                 "input": user_query
             }):
                 full_response += chunk.content
-                message_placeholder.markdown(f"<span class='ai-msg'></span>{full_response}▌", unsafe_allow_html=True)
+                message_placeholder.markdown(full_response + "▌")
         
         # 최종 응답 출력 및 기록 저장
-        message_placeholder.markdown(f"<span class='ai-msg'></span>{full_response}", unsafe_allow_html=True)
+        message_placeholder.markdown(full_response)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
