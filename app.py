@@ -16,8 +16,26 @@ from langchain_core.messages import HumanMessage, AIMessage
 # 환경 변수 로드
 load_dotenv()
 
+# 게임별 설정 정보
+GAME_CONFIG = {
+    "마인크래프트": {
+        "icon": "마크로고.webp",
+        "collection": None,  # 기본 컬렉션 사용
+        "description": "마인크래프트 공식 위키와 커뮤니티의 꿀팁들을 모두 모아, 게임 플레이 중 궁금한 점을 빠르고 정확하게 알려드리는 지능형 RAG 챗봇입니다.",
+        "placeholder": "질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)",
+        "sources": "- 마인크래프트 공식 위키<br>- 나무위키 (팁/글리치)"
+    },
+    "발헤임": {
+        "icon": None,
+        "collection": "valheim",
+        "description": "발헤임 나무위키 데이터를 학습한 RAG 챗봇입니다. 보스 공략, 장비 제작, 생물 군계 등 무엇이든 물어보세요.",
+        "placeholder": "질문을 입력하세요 (예: 엘더는 어떻게 잡아?)",
+        "sources": "- 나무위키 발헤임 문서"
+    }
+}
+
 # 웹 UI 기본 설정 및 커스텀 CSS (모던 디자인)
-st.set_page_config(page_title="Minecraft RAG Guide", page_icon="마크로고.webp")
+st.set_page_config(page_title="Game RAG Guide", page_icon="마크로고.webp")
 
 st.markdown("""
 <style>
@@ -35,68 +53,95 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 로고와 타이틀을 나란히 배치
-col1, col2 = st.columns([1, 8])
-with col1:
-    st.image("마크로고.webp", width=60)
-with col2:
-    st.title("마인크래프트 지능형 가이드")
-
-st.markdown("**마인크래프트 공식 위키와 커뮤니티의 꿀팁들을 모두 모아, 게임 플레이 중 궁금한 점을 빠르고 정확하게 알려드리는 지능형 RAG 챗봇입니다. 무엇이든 물어보세요!**")
-
-# 사이드바 추가 (기능 및 디자인 다듬기)
+# 사이드바 - 게임 선택 드롭다운 및 설정
 with st.sidebar:
+    st.markdown("### 게임 선택")
+    selected_game = st.selectbox(
+        "게임을 선택하세요",
+        list(GAME_CONFIG.keys()),
+        label_visibility="collapsed"
+    )
+    
+    # 게임 변경 감지 시 대화 초기화
+    if "selected_game" not in st.session_state:
+        st.session_state.selected_game = selected_game
+    if st.session_state.selected_game != selected_game:
+        st.session_state.selected_game = selected_game
+        st.session_state.messages = []
+        st.rerun()
+    
     st.markdown("### ⚙️ 챗봇 설정")
     if st.button("대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
     
-    # 빈 공간을 만들어 하단으로 밀어내기
     st.markdown("<br>" * 15, unsafe_allow_html=True)
     st.markdown("---")
     
-    # 폰트 크기를 줄여서 하단에 배치
-    st.markdown("""
+    # 게임별 데이터 소스 동적 출력
+    config = GAME_CONFIG[selected_game]
+    st.markdown(f"""
     <div class='sidebar-footer'>
+    <b>현재 게임:</b><br>
+    {selected_game}<br><br>
     <b>데이터 소스:</b><br>
-    - 마인크래프트 공식 위키<br>
-    - 나무위키 (팁/글리치)<br><br>
+    {config['sources']}<br><br>
     <b>AI 모델:</b><br>
     - Google Gemini 2.5 Flash
     </div>
     """, unsafe_allow_html=True)
 
-# 모델 및 벡터 DB 로드 (캐싱 적용)
+# 선택된 게임에 따라 타이틀 및 설명 동적 변경
+config = GAME_CONFIG[selected_game]
+col1, col2 = st.columns([1, 8])
+with col1:
+    if config["icon"]:
+        st.image(config["icon"], width=60)
+with col2:
+    st.title(f"{selected_game} 지능형 가이드")
+
+st.markdown(f"**{config['description']}**")
+
+# 모델 및 벡터 DB 로드 (캐싱 적용, 게임별 컬렉션 분리)
 @st.cache_resource
-def load_rag_components():
+def load_embeddings_and_llm():
     embeddings = HuggingFaceEmbeddings(
         model_name="jhgan/ko-sroberta-multitask",
         model_kwargs={'device': 'cpu'},
         encode_kwargs={'normalize_embeddings': True}
     )
-    vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, streaming=True)
-    return vectorstore, llm
+    return embeddings, llm
 
-vectorstore, llm = load_rag_components()
+@st.cache_resource
+def load_vectorstore(_embeddings, collection_name):
+    if collection_name:
+        return Chroma(
+            persist_directory="./chroma_db",
+            embedding_function=_embeddings,
+            collection_name=collection_name
+        )
+    return Chroma(persist_directory="./chroma_db", embedding_function=_embeddings)
 
-# 프롬프트 템플릿 설정
-qa_system_prompt = """당신은 마인크래프트(Minecraft) 게임의 최고 전문가이자 친절한 지능형 가이드 챗봇입니다.
+embeddings, llm = load_embeddings_and_llm()
+vectorstore = load_vectorstore(embeddings, config["collection"])
+
+# 프롬프트 템플릿 설정 (게임 동적 적용)
+qa_system_prompt = f"""당신은 {selected_game} 게임의 최고 전문가이자 친절한 지능형 가이드 챗봇입니다.
 아래 제공된 [Context] 정보와 [대화 기록]을 참고하여 사용자의 질문에 답변하십시오.
 
 답변을 작성할 때 다음 [가이드라인]을 반드시 준수하십시오:
 
 [가이드라인]
 1. 가독성: 마크다운(Markdown) 문법을 적극 활용하여 제목, 글머리 기호(-), 굵은 글씨(**) 등으로 깔끔하게 정리해서 답변하세요.
-2. 조합법(제작) 질문: [Context]에 [1번칸:아이템명] 같은 3x3 제작 배치도 정보가 있다면, 
-   반드시 '제작대 3x3 칸 기준'으로 위치를 명확히 풀어서 설명해주세요.
-3. 몹(Mob) 질문: 체력, 공격력, 드롭 아이템, 스폰 장소, 특징 등 중요한 스펙을 요약해서 알려주세요.
-4. 생물 군계/구조물 질문: 해당 지역의 특징, 발견할 수 있는 블록이나 전리품(상자), 출현하는 몹 위주로 설명해주세요.
+2. 조합법(제작) 질문: 제작 방법이 있다면 필요한 재료와 위치를 명확히 풀어서 설명해주세요.
+3. 몹/생물 질문: 체력, 공격력, 드롭 아이템, 스폰 장소, 특징 등 중요한 스펙을 요약해서 알려주세요.
+4. 생물 군계/구조물 질문: 해당 지역의 특징, 발견할 수 있는 자원, 출현하는 몹 위주로 설명해주세요.
 5. 패치/업데이트 질문: 버전 역사 정보가 포함되어 있다면, 어느 버전에서 변경되었는지 명시해주세요.
-6. ⚠️ 커뮤니티 팁/글리치 (면책 조항): [Context]에 없는 내용(글리치, 꼼수, 스피드런 팁 등)을 질문받으면, 당신의 사전 지식을 활용하여 답변하되, 반드시 답변 서두에 **[⚠️ 주의: 이 내용은 공식 위키에 없는 커뮤니티 팁/버그이며, 게임 버전에 따라 막혔거나 다를 수 있습니다]** 라고 명시하십시오. 공식 위키(Context)에 있는 내용은 경고문 없이 답변하세요.
+6. 커뮤니티 팁/글리치 (면책 조항): [Context]에 없는 내용(글리치, 꼼수, 스피드런 팁 등)을 질문받으면, 당신의 사전 지식을 활용하여 답변하되, 반드시 답변 서두에 **[⚠️ 주의: 이 내용은 공식 위키에 없는 커뮤니티 팁/버그이며, 게임 버전에 따라 막혔거나 다를 수 있습니다]** 라고 명시하십시오.
 
 [Context]
-{context}"""
+{{context}}"""
 
 qa_prompt = ChatPromptTemplate.from_messages([
     ("system", qa_system_prompt),
@@ -114,7 +159,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # 사용자 입력 및 챗봇 응답 처리
-if user_query := st.chat_input("질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)"):
+if user_query := st.chat_input(config["placeholder"]):
     # 사용자 질문 화면 표시 및 기록 저장
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
