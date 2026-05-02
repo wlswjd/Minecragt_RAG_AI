@@ -20,87 +20,211 @@ load_dotenv()
 GAME_CONFIG = {
     "마인크래프트": {
         "icon": "마크로고.webp",
-        "collection": None,  # 기본 컬렉션 사용
+        "collection": None,
         "description": "마인크래프트 공식 위키와 커뮤니티의 꿀팁들을 모두 모아, 게임 플레이 중 궁금한 점을 빠르고 정확하게 알려드리는 지능형 RAG 챗봇입니다.",
         "placeholder": "질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)",
-        "sources": "- 마인크래프트 공식 위키<br>- 나무위키 (팁/글리치)"
+        "sources": "- 마인크래프트 공식 위키<br>- 나무위키 (팁/글리치)",
+        "accent": "#3CAF55"
     },
     "발헤임": {
-        "icon": None,
+        "icon": "발헤임로고.png",
         "collection": "valheim",
-        "description": "발헤임 나무위키 데이터를 학습한 RAG 챗봇입니다. 보스 공략, 장비 제작, 생물 군계 등 무엇이든 물어보세요.",
+        "description": "발헤임 나무위키 + 디시인사이드 갤러리 공략글까지 학습한 RAG 챗봇입니다. 보스 공략, 장비 제작, 빌드 노하우까지 무엇이든 물어보세요.",
         "placeholder": "질문을 입력하세요 (예: 엘더는 어떻게 잡아?)",
-        "sources": "- 나무위키 발헤임 문서"
+        "sources": "- 나무위키 발헤임 문서<br>- 디시 발헤임 갤러리 (개념글 공략)",
+        "accent": "#E07B3C"
     }
 }
 
-# 웹 UI 기본 설정 및 커스텀 CSS (모던 디자인)
-st.set_page_config(page_title="Game RAG Guide", page_icon="마크로고.webp")
+# 웹 UI 기본 설정
+st.set_page_config(
+    page_title="Game RAG Guide",
+    page_icon="마크로고.webp",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.markdown("""
-<style>
-/* 사이드바 하단 고정 텍스트 */
-[data-testid="stSidebar"] {
-    position: relative;
-}
-.sidebar-footer {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    font-size: 0.8em;
-    color: #a0a0a0;
-}
-</style>
-""", unsafe_allow_html=True)
+# 세션 상태 초기 설정 (게임 변경 감지용 사전 처리)
+if "selected_game" not in st.session_state:
+    st.session_state.selected_game = list(GAME_CONFIG.keys())[0]
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# 사이드바 - 게임 선택 드롭다운 및 설정
+# 사이드바 - 게임 선택 및 설정
 with st.sidebar:
-    st.markdown("### 게임 선택")
+    st.markdown("<div class='sidebar-brand'>🎮 Game Wiki AI</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sidebar-subtitle'>나만의 게임 가이드 챗봇</div>", unsafe_allow_html=True)
+    st.markdown("---")
+    
+    st.markdown("##### 게임 선택")
     selected_game = st.selectbox(
         "게임을 선택하세요",
         list(GAME_CONFIG.keys()),
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="game_selector"
     )
     
-    # 게임 변경 감지 시 대화 초기화
-    if "selected_game" not in st.session_state:
-        st.session_state.selected_game = selected_game
     if st.session_state.selected_game != selected_game:
         st.session_state.selected_game = selected_game
         st.session_state.messages = []
         st.rerun()
     
-    st.markdown("### ⚙️ 챗봇 설정")
-    if st.button("대화 초기화", use_container_width=True):
+    st.markdown("##### 챗봇 제어")
+    if st.button("🔄  대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
     
-    st.markdown("<br>" * 15, unsafe_allow_html=True)
     st.markdown("---")
-    
-    # 게임별 데이터 소스 동적 출력
     config = GAME_CONFIG[selected_game]
     st.markdown(f"""
+    <div class='sidebar-info'>
+        <div class='info-row'><span class='info-label'>현재 게임</span><span class='info-value'>{selected_game}</span></div>
+        <div class='info-row'><span class='info-label'>AI 모델</span><span class='info-value'>Gemini 2.5 Flash</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(f"""
     <div class='sidebar-footer'>
-    <b>현재 게임:</b><br>
-    {selected_game}<br><br>
-    <b>데이터 소스:</b><br>
-    {config['sources']}<br><br>
-    <b>AI 모델:</b><br>
-    - Google Gemini 2.5 Flash
+        <div class='footer-title'>데이터 소스</div>
+        <div class='footer-content'>{config['sources']}</div>
+        <div class='footer-divider'></div>
+        <div class='footer-copy'>© 2026 Game RAG AI</div>
     </div>
     """, unsafe_allow_html=True)
 
-# 선택된 게임에 따라 타이틀 및 설명 동적 변경
+# 동적 CSS (게임별 강조 색상)
 config = GAME_CONFIG[selected_game]
-col1, col2 = st.columns([1, 8])
-with col1:
-    if config["icon"]:
-        st.image(config["icon"], width=60)
-with col2:
-    st.title(f"{selected_game} 지능형 가이드")
+st.markdown(f"""
+<style>
+/* 전체 레이아웃 여백 및 폰트 */
+.main .block-container {{
+    padding-top: 2rem;
+    padding-bottom: 5rem;
+    max-width: 900px;
+}}
 
-st.markdown(f"**{config['description']}**")
+/* 헤더 카드 */
+.header-card {{
+    background: linear-gradient(135deg, rgba(30,37,50,0.85), rgba(43,49,62,0.7));
+    border-radius: 16px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+    border-left: 4px solid {config['accent']};
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+}}
+.header-card img {{
+    height: 56px;
+    border-radius: 8px;
+}}
+.header-card .title {{
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fafafa;
+    margin: 0;
+}}
+.header-card .subtitle {{
+    font-size: 0.9rem;
+    color: #c0c0c0;
+    margin-top: 4px;
+    line-height: 1.5;
+}}
+
+/* 사이드바 브랜딩 */
+.sidebar-brand {{
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #fafafa;
+    padding: 8px 0 4px 0;
+}}
+.sidebar-subtitle {{
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 8px;
+}}
+
+/* 사이드바 정보 카드 */
+.sidebar-info {{
+    background-color: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.85em;
+    color: #d0d0d0;
+}}
+.info-row {{
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
+}}
+.info-label {{
+    color: #888;
+}}
+.info-value {{
+    color: #fafafa;
+    font-weight: 600;
+}}
+
+/* 사이드바 하단 푸터 */
+[data-testid="stSidebar"] {{
+    position: relative;
+}}
+.sidebar-footer {{
+    margin-top: 30px;
+    font-size: 0.78em;
+    color: #888;
+}}
+.footer-title {{
+    color: #aaa;
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}}
+.footer-content {{
+    color: #888;
+    line-height: 1.6;
+}}
+.footer-divider {{
+    border-top: 1px solid #333;
+    margin: 14px 0;
+}}
+.footer-copy {{
+    color: #666;
+    font-size: 0.9em;
+}}
+
+/* 사이드바 버튼 호버 효과 */
+[data-testid="stSidebar"] .stButton button {{
+    background-color: rgba(255,255,255,0.05);
+    color: #e0e0e0;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.2s ease;
+}}
+[data-testid="stSidebar"] .stButton button:hover {{
+    background-color: {config['accent']}33;
+    border-color: {config['accent']};
+    color: #fafafa;
+}}
+
+/* 채팅 입력창 강조 */
+[data-testid="stChatInput"] {{
+    border-top: 1px solid {config['accent']}33;
+}}
+</style>
+""", unsafe_allow_html=True)
+
+# 헤더 영역 (로고 + 타이틀 + 설명을 카드로 통합)
+icon_html = f"<img src='data:image/png;base64,{__import__('base64').b64encode(open(config['icon'],'rb').read()).decode()}' />" if config['icon'] and os.path.exists(config['icon']) else ""
+
+st.markdown(f"""
+<div class='header-card'>
+    {icon_html}
+    <div>
+        <div class='title'>{selected_game} 지능형 가이드</div>
+        <div class='subtitle'>{config['description']}</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # 모델 및 벡터 DB 로드 (캐싱 적용, 게임별 컬렉션 분리)
 @st.cache_resource
@@ -149,10 +273,6 @@ qa_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-# 세션 상태 기반 대화 기록 관리
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 # 이전 대화 기록 화면 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -160,18 +280,15 @@ for message in st.session_state.messages:
 
 # 사용자 입력 및 챗봇 응답 처리
 if user_query := st.chat_input(config["placeholder"]):
-    # 사용자 질문 화면 표시 및 기록 저장
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
         st.markdown(user_query)
 
-    # LangChain용 대화 기록 변환 및 이전 질문 추출
+    # LangChain용 대화 기록 변환
     chat_history = []
-    prev_user_query = ""
     for msg in st.session_state.messages[:-1]:
         if msg["role"] == "user":
             chat_history.append(HumanMessage(content=msg["content"]))
-            prev_user_query = msg["content"] # 마지막 이전 질문 저장
         else:
             chat_history.append(AIMessage(content=msg["content"]))
 
@@ -181,12 +298,11 @@ if user_query := st.chat_input(config["placeholder"]):
         full_response = ""
         
         with st.spinner("위키 DB 검색 중..."):
-            # 검색(Retrieval)은 현재 질문으로만 수행하여 주제 전환에 대응함.
-            # 대명사 생략 질문은 LLM이 대화 기록을 읽고 문맥을 파악하여 답변함.
+            # 검색은 현재 질문으로만 수행하여 주제 전환 대응
+            # 대명사 생략 질문은 LLM이 대화 기록을 읽고 문맥 파악
             retrieved_docs = vectorstore.similarity_search(user_query, k=5)
             context_text = "\n\n".join([doc.page_content for doc in retrieved_docs]) if retrieved_docs else "관련 정보를 찾을 수 없습니다."
             
-            # 체인 조립 및 스트리밍 실행 (API 호출 1회)
             chain = qa_prompt | llm
             for chunk in chain.stream({
                 "context": context_text,
@@ -196,6 +312,5 @@ if user_query := st.chat_input(config["placeholder"]):
                 full_response += chunk.content
                 message_placeholder.markdown(full_response + "▌")
         
-        # 최종 응답 출력 및 기록 저장
         message_placeholder.markdown(full_response)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
