@@ -20,7 +20,7 @@ load_dotenv()
 GAME_CONFIG = {
     "마인크래프트": {
         "icon": "마크로고.webp",
-        "collection": None,
+        "collection": "langchain",
         "description": "마인크래프트 공식 위키와 커뮤니티의 꿀팁들을 모두 모아, 게임 플레이 중 궁금한 점을 빠르고 정확하게 알려드리는 지능형 RAG 챗봇입니다.",
         "placeholder": "질문을 입력하세요 (예: 구리 곡괭이는 어떻게 만들어?)",
         "sources": "- 마인크래프트 공식 위키<br>- 나무위키 (팁/글리치)",
