@@ -306,21 +306,45 @@ if user_query := st.chat_input(config["placeholder"]):
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
-        
+
         with st.spinner("위키 DB 검색 중..."):
             # 검색은 현재 질문으로만 수행하여 주제 전환 대응
             # 대명사 생략 질문은 LLM이 대화 기록을 읽고 문맥 파악
             retrieved_docs = vectorstore.similarity_search(user_query, k=5)
             context_text = "\n\n".join([doc.page_content for doc in retrieved_docs]) if retrieved_docs else "관련 정보를 찾을 수 없습니다."
-            
             chain = qa_prompt | llm
-            for chunk in chain.stream({
+            stream_input = {
                 "context": context_text,
                 "chat_history": chat_history,
-                "input": user_query
-            }):
-                full_response += chunk.content
-                message_placeholder.markdown(full_response + "▌")
-        
-        message_placeholder.markdown(full_response)
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+                "input": user_query,
+            }
+
+            # Gemini 서버 일시 장애(5xx) 또는 스트림 끊김 발생 시 최대 2회 재시도
+            import time as _time
+            stream_error = None
+            for attempt in range(2):
+                try:
+                    full_response = ""
+                    for chunk in chain.stream(stream_input):
+                        full_response += chunk.content
+                        message_placeholder.markdown(full_response + "▌")
+                    stream_error = None
+                    break
+                except Exception as e:
+                    stream_error = e
+                    if attempt == 0:
+                        message_placeholder.markdown("⏳ 응답 중 일시 오류가 발생했어요. 잠시 후 다시 시도합니다…")
+                        _time.sleep(2)
+
+        if stream_error is not None:
+            # 재시도까지 실패한 경우 사용자에게 친절한 메시지 표시 후 대화 기록에서 제외
+            err_name = type(stream_error).__name__
+            friendly = (
+                f"죄송합니다. Gemini 서버에서 일시적인 오류가 발생해 답변을 완성하지 못했어요.\n\n"
+                f"- 에러 종류: `{err_name}`\n"
+                f"- 잠시 후(10~30초) 같은 질문을 다시 보내주세요. 대부분 자동으로 해결됩니다."
+            )
+            message_placeholder.markdown(friendly)
+        else:
+            message_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
