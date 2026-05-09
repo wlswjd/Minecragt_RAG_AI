@@ -21,7 +21,7 @@ vectorstore = Chroma(
     embedding_function=embeddings,
     collection_name="valheim"
 )
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
 
 BASE_URL = "https://gall.dcinside.com"
 LIST_URL = "https://gall.dcinside.com/mgallery/board/lists/"
