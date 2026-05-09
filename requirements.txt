@@ -13,3 +13,4 @@ pysqlite3-binary
 protobuf<=3.20.3
 sentence-transformers
 rank-bm25
+chromadb==1.5.7

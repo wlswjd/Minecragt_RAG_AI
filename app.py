@@ -252,24 +252,13 @@ def load_bm25(collection_name):
 
 @st.cache_resource
 def load_vectorstore(_embeddings, collection_name):
-    hnsw_meta = {
-        "hnsw:space": "cosine",
-        "hnsw:M": 16,
-        "hnsw:construction_ef": 100,
-        "hnsw:search_ef": 30,
-    }
     if collection_name:
         return Chroma(
             persist_directory="./chroma_db",
             embedding_function=_embeddings,
             collection_name=collection_name,
-            collection_metadata=hnsw_meta,
         )
-    return Chroma(
-        persist_directory="./chroma_db",
-        embedding_function=_embeddings,
-        collection_metadata=hnsw_meta,
-    )
+    return Chroma(persist_directory="./chroma_db", embedding_function=_embeddings)
 
 embeddings, llm = load_embeddings_and_llm()
 vectorstore = load_vectorstore(embeddings, config["collection"])
