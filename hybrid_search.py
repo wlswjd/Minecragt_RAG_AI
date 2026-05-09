@@ -1,6 +1,5 @@
 import re
 import pickle
-import os
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
 
@@ -18,14 +17,14 @@ def tokenize(text: str) -> list[str]:
     return text.split()
 
 
-def build_bm25_index(vectorstore, bm25_path: str):
+def build_bm25_index(vectorstore, bm25_path: str, collection_name: str = ""):
     """ChromaDB의 모든 청크를 가져와 BM25 인덱스 생성 후 pickle로 저장.
     새 데이터를 batch_loader로 추가한 뒤 반드시 재실행해야 인덱스가 갱신됨.
     """
-    collection_name = vectorstore._collection.name
-    print(f"[{collection_name}] ChromaDB 청크 로딩 중...")
+    label = collection_name or bm25_path
+    print(f"[{label}] ChromaDB 청크 로딩 중...")
 
-    result = vectorstore._collection.get(include=["documents", "metadatas"])
+    result = vectorstore.get(include=["documents", "metadatas"])
     ids = result["ids"]
     documents = result["documents"]
     metadatas = result["metadatas"]
@@ -82,19 +81,16 @@ def hybrid_search(
     bm25, ids, documents, metadatas = bm25_data
     idx_to_id = {i: doc_id for i, doc_id in enumerate(ids)}
     id_to_doc = {doc_id: (documents[i], metadatas[i]) for i, doc_id in enumerate(ids)}
+    # Dense 결과(Document)를 BM25 ID와 연결하기 위한 역매핑
+    content_to_id = {doc: doc_id for doc_id, (doc, _) in id_to_doc.items()}
 
-    # 1. Dense 검색 — LangChain 래퍼 내부 컬렉션을 직접 쿼리
-    query_embedding = vectorstore._embedding_function.embed_query(query)
-    n_results = min(top_n, vectorstore._collection.count())
-    dense_raw = vectorstore._collection.query(
-        query_embeddings=[query_embedding],
-        n_results=n_results,
-        include=["documents"],
-    )
-    dense_results = [
-        (doc_id, rank + 1)
-        for rank, doc_id in enumerate(dense_raw["ids"][0])
-    ]
+    # 1. Dense 검색 — LangChain 공개 API만 사용
+    dense_docs = vectorstore.similarity_search(query, k=top_n)
+    dense_results = []
+    for rank, doc in enumerate(dense_docs):
+        doc_id = content_to_id.get(doc.page_content)
+        if doc_id:
+            dense_results.append((doc_id, rank + 1))
 
     # 2. BM25 검색
     tokens = tokenize(query)
@@ -137,10 +133,10 @@ if __name__ == "__main__":
             embedding_function=embeddings,
             collection_name=collection_name,
         )
-        count = vs._collection.count()
-        if count == 0:
+        result = vs.get(include=["documents"])
+        if not result["ids"]:
             print(f"[{collection_name}] 컬렉션이 비어 있음. 스킵.\n")
             continue
-        build_bm25_index(vs, bm25_path)
+        build_bm25_index(vs, bm25_path, collection_name)
 
     print("=== 전체 BM25 인덱스 빌드 완료 ===")
