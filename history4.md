@@ -1,9 +1,9 @@
-# Minecraft RAG AI 챗봇 개발 히스토리 (Part 4: RAG 고도화 — 메타데이터 보강 / HNSW / Hybrid Search)
+# Minecraft RAG AI 챗봇 개발 히스토리 (Part 4: RAG 고도화 — 메타데이터 보강 / HNSW / Hybrid Search / Re-ranking / 재인덱싱)
 
 ## 배경 및 목표
 기존 RAG(history1~3)는 순수 Dense 검색(`similarity_search(k=5)`)만 사용했음.
 RAG 학습(Day 1~6) 내용을 실제 프로젝트에 적용하여 검색 품질을 단계적으로 개선하는 작업 진행.
-개선 계획 전체는 `CLAUDE.md`에 명시되어 있으며, 이번 파트에서 1~3단계를 완료함.
+개선 계획 전체는 `CLAUDE.md`에 명시되어 있으며, 이번 파트에서 전 단계(메타데이터 보강 / HNSW / Hybrid Search / Re-ranking / 재인덱싱)를 모두 완료함.
 
 ---
 
@@ -94,19 +94,100 @@ BM25는 키워드 검색에 강하지만 의미론적 유사도를 모름.
 
 ---
 
-## 현재 파일 구조 요약
+---
 
-| 파일 | 역할 |
-|------|------|
-| `batch_loader_full.py` | 공식 위키 크롤러 — 메타데이터 보강(source/category/url), HNSW 파라미터 적용 |
-| `namuwiki_loader.py` | 나무위키 크롤러 — `source: "namu_wiki"` 이미 있음 (category/url 미추가) |
-| `valheim_dcinside_loader.py` | 디시 갤러리 크롤러 — source/game/post_id 이미 있음 |
-| `hybrid_search.py` | BM25 인덱스 빌드 + Hybrid Search 함수 모듈 |
-| `app.py` | Streamlit UI — Hybrid Search 적용 완료, BM25 없으면 Dense로 폴백 |
+## 4단계: Re-ranking 도입 (`reranker.py` 신규, `app.py` 수정)
+
+### 배경
+Hybrid Search가 RRF로 상위 30개 후보를 뽑더라도, 순위 기준이 여전히 Dense+BM25 점수의 합산임.
+Cross-Encoder(재랭커)는 쿼리-문서 쌍을 직접 비교해 더 정밀한 점수를 매기므로 최종 5개의 품질이 올라감.
+
+### `reranker.py` 구조
+* `load_reranker()` — `Dongjin-kr/ko-reranker` CrossEncoder 로드 (`device="cpu"`).
+* `rerank(query, docs, reranker, top_k=5)` — `(query, doc.page_content)` 쌍을 CrossEncoder에 넣어 점수순 정렬 후 상위 `top_k` 반환. 반환 타입은 LangChain `Document` 리스트.
+
+### `app.py` 추가 변경
+* `from reranker import load_reranker, rerank as _rerank` 추가.
+* `@st.cache_resource load_reranker_model()` 함수 추가 — 앱 기동 시 1회 로드 후 캐싱.
+* 검색 파이프라인 최종 형태:
+  1. `_hybrid_search(..., top_n=30, top_k=30)` → 후보 30개
+  2. `_rerank(query, candidates, reranker, top_k=5)` → 최종 5개
+  3. BM25 인덱스 없는 경우 기존 `similarity_search(k=5)` 폴백 유지.
+
+### 주의
+* `Dongjin-kr/ko-reranker` 모델 크기 약 500MB — 앱 첫 실행(또는 Streamlit Cloud 재기동) 시 HuggingFace에서 자동 다운로드.
+* Streamlit Community Cloud RAM 1GB 한계 상 임베딩 모델 + 재랭커 동시 상주가 부담될 수 있음. OOM 발생 시 재랭커 제외 분기 검토 필요.
 
 ---
 
-## 남은 작업 (예정)
-* **재인덱싱:** `chroma_db` 삭제 후 청크 크기 800→400으로 줄여 전체 재수집 → HNSW 파라미터 실제 적용.
-* **Re-ranking:** `reranker.py` 신규 작성 (`Dongjin-kr/ko-reranker`, Top-N=30 → Top-K=5).
-* `namuwiki_loader.py`에 `category`, `url` 메타데이터 보강.
+## 5단계: 전체 재인덱싱
+
+### 배경
+* 기존 청크 크기(800~1000자)가 임베딩 모델(`ko-sroberta`, 토큰 한계 약 300~400자 한국어) 초과.
+* 재인덱싱으로 청크 크기를 줄이고, HNSW 파라미터도 실제 컬렉션에 적용.
+
+### 변경 내용
+4개 로더 파일 청크 크기 전부 통일:
+
+| 파일 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| `batch_loader_full.py` | chunk_size=800, overlap=100 | chunk_size=400, overlap=80 |
+| `namuwiki_loader.py` | chunk_size=1000, overlap=200 | chunk_size=400, overlap=80 |
+| `valheim_namuwiki_loader.py` | chunk_size=1000, overlap=200 | chunk_size=400, overlap=80 |
+| `valheim_dcinside_loader.py` | chunk_size=1000, overlap=200 | chunk_size=400, overlap=80 |
+
+### 실행 순서
+```bash
+# 기존 DB·인덱스·진행 기록 전부 초기화
+rm -rf chroma_db/ bm25_minecraft.pkl bm25_valheim.pkl
+rm -f processed_items.txt processed_dc_posts.txt
+
+# 마인크래프트 수집
+python batch_loader_full.py
+python namuwiki_loader.py
+
+# 발헤임 수집
+python valheim_namuwiki_loader.py
+python valheim_dcinside_loader.py
+
+# BM25 재빌드
+python hybrid_search.py
+
+# GitHub 푸시 (Streamlit Cloud 자동 반영)
+git add chroma_db/ bm25_minecraft.pkl bm25_valheim.pkl processed_items.txt processed_dc_posts.txt
+git commit -m "reindex: chunk_size 400/80 전체 통일, DB·BM25 재구축"
+git push
+```
+
+### 효과
+* 임베딩 품질 향상 (토큰 초과 구간 제거).
+* HNSW `collection_metadata` 파라미터가 신규 컬렉션에 실제 적용.
+* BM25 인덱스도 새 청크 기준으로 재구축.
+
+---
+
+## 최종 파이프라인 (완성)
+
+```
+사용자 질문
+    ↓
+Dense 검색 (top 30)  +  BM25 검색 (top 30)
+    ↓
+RRF 결합 → 후보 30개
+    ↓
+Cross-Encoder (Dongjin-kr/ko-reranker) → 최종 5개
+    ↓
+Gemini 2.5 Flash → 답변
+```
+
+## 최종 파일 구조
+
+| 파일 | 역할 |
+|------|------|
+| `batch_loader_full.py` | 마인크래프트 공식 위키 크롤러 — 메타데이터(source/category/url), HNSW, chunk 400 |
+| `namuwiki_loader.py` | 마인크래프트 나무위키 크롤러 — chunk 400 |
+| `valheim_namuwiki_loader.py` | 발헤임 나무위키 크롤러 — chunk 400 |
+| `valheim_dcinside_loader.py` | 발헤임 디시 갤러리 크롤러 — chunk 400 |
+| `hybrid_search.py` | BM25 인덱스 빌드 + Hybrid Search 모듈 |
+| `reranker.py` | Cross-Encoder Re-ranking 모듈 |
+| `app.py` | Streamlit UI — 전체 파이프라인 연결 완료 |
