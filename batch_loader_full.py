@@ -25,7 +25,7 @@ vectorstore = Chroma(
         "hnsw:search_ef": 30,
     }
 )
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
 
 # 이미 처리한 아이템을 기록할 파일
 PROCESSED_FILE = "processed_items.txt"
