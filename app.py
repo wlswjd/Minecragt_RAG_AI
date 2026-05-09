@@ -12,6 +12,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+from hybrid_search import hybrid_search as _hybrid_search, load_bm25_index, BM25_PATHS
+from reranker import load_reranker, rerank as _rerank
 
 # 환경 변수 로드
 load_dotenv()
@@ -238,14 +240,36 @@ def load_embeddings_and_llm():
     return embeddings, llm
 
 @st.cache_resource
+def load_reranker_model():
+    return load_reranker()
+
+@st.cache_resource
+def load_bm25(collection_name):
+    bm25_path = BM25_PATHS.get(collection_name)
+    if bm25_path and os.path.exists(bm25_path):
+        return load_bm25_index(bm25_path)
+    return None
+
+@st.cache_resource
 def load_vectorstore(_embeddings, collection_name):
+    hnsw_meta = {
+        "hnsw:space": "cosine",
+        "hnsw:M": 16,
+        "hnsw:construction_ef": 100,
+        "hnsw:search_ef": 30,
+    }
     if collection_name:
         return Chroma(
             persist_directory="./chroma_db",
             embedding_function=_embeddings,
-            collection_name=collection_name
+            collection_name=collection_name,
+            collection_metadata=hnsw_meta,
         )
-    return Chroma(persist_directory="./chroma_db", embedding_function=_embeddings)
+    return Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=_embeddings,
+        collection_metadata=hnsw_meta,
+    )
 
 embeddings, llm = load_embeddings_and_llm()
 vectorstore = load_vectorstore(embeddings, config["collection"])
@@ -307,10 +331,14 @@ if user_query := st.chat_input(config["placeholder"]):
         message_placeholder = st.empty()
         full_response = ""
 
-        with st.spinner("위키 DB 검색 중..."):
-            # 검색은 현재 질문으로만 수행하여 주제 전환 대응
-            # 대명사 생략 질문은 LLM이 대화 기록을 읽고 문맥 파악
-            retrieved_docs = vectorstore.similarity_search(user_query, k=5)
+        with st.spinner("DB 하이브리드 검색 중..."):
+            bm25_data = load_bm25(config["collection"])
+            if bm25_data:
+                candidates = _hybrid_search(user_query, vectorstore, bm25_data, top_n=30, top_k=30)
+                reranker = load_reranker_model()
+                retrieved_docs = _rerank(user_query, candidates, reranker, top_k=5)
+            else:
+                retrieved_docs = vectorstore.similarity_search(user_query, k=5)
             context_text = "\n\n".join([doc.page_content for doc in retrieved_docs]) if retrieved_docs else "관련 정보를 찾을 수 없습니다."
             chain = qa_prompt | llm
             stream_input = {

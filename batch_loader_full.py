@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+from urllib.parse import quote
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
@@ -14,7 +15,16 @@ embeddings = HuggingFaceEmbeddings(
     model_kwargs={'device': 'cpu'},
     encode_kwargs={'normalize_embeddings': True}
 )
-vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+vectorstore = Chroma(
+    persist_directory="./chroma_db",
+    embedding_function=embeddings,
+    collection_metadata={
+        "hnsw:space": "cosine",
+        "hnsw:M": 16,
+        "hnsw:construction_ef": 100,
+        "hnsw:search_ef": 30,
+    }
+)
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
 
 # 이미 처리한 아이템을 기록할 파일
@@ -89,22 +99,28 @@ def get_all_items_from_category(category_name, limit=None, visited_categories=No
     # 중복 제거 후 반환
     return list(set(items))
 
-def get_full_item_data(item_name):
+def get_full_item_data(item_name, category=None, source="official_wiki"):
     """단일 아이템의 '일반 정보(텍스트)'와 '정밀 조합법'을 모두 파싱합니다."""
     api_url = "https://ko.minecraft.wiki/api.php"
     params = {"action": "parse", "page": item_name, "format": "json", "prop": "text"}
     headers = {"User-Agent": "MinecraftRAGProject/1.0 (Contact: myemail@example.com)"}
+    item_url = f"https://ko.minecraft.wiki/w/{quote(item_name, safe='')}"
+    base_meta = {
+        "source": source,
+        "category": category or "core_system",
+        "url": item_url,
+    }
 
     try:
         res = requests.get(api_url, params=params, headers=headers)
         data = res.json()
         if "error" in data:
             return []
-            
+
         html = data["parse"]["text"]["*"]
         soup = BeautifulSoup(html, 'html.parser')
         documents = []
-        
+
         # 1. 일반 텍스트 정보 추출 (p 태그)
         paragraphs = soup.find_all('p')
         general_text = "\n".join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
@@ -112,7 +128,10 @@ def get_full_item_data(item_name):
             chunks = text_splitter.split_text(general_text)
             for chunk in chunks:
                 content = f"아이템: {item_name}\n설명: {chunk}"
-                documents.append(Document(page_content=content, metadata={"item": item_name, "type": "일반정보"}))
+                documents.append(Document(
+                    page_content=content,
+                    metadata={"item": item_name, "type": "일반정보", **base_meta}
+                ))
 
         # 2. 정밀 조합법 추출 (mcui-Crafting_Table)
         mcui_layouts = soup.find_all('span', class_='mcui-Crafting_Table')
@@ -121,14 +140,14 @@ def get_full_item_data(item_name):
             slots = []
             for row in rows:
                 slots.extend(row.find_all('span', class_='invslot'))
-            
+
             output_span = layout.find('span', class_='mcui-output')
             output_item = item_name
             if output_span:
                 output_a = output_span.find('a')
                 if output_a and output_a.get('title'):
                     output_item = output_a.get('title')
-            
+
             if len(slots) >= 9:
                 grid = []
                 empty_count = 0
@@ -142,14 +161,18 @@ def get_full_item_data(item_name):
                     if item == "빈칸":
                         empty_count += 1
                     grid.append(f"{i+1}번칸:{item}")
-                
+
                 if empty_count == 9:
                     continue
-                
+
                 grid_display = f"\n[{grid[0]}][{grid[1]}][{grid[2]}]\n[{grid[3]}][{grid[4]}][{grid[5]}]\n[{grid[6]}][{grid[7]}][{grid[8]}]"
                 content = f"아이템: {output_item}\n제작 배치도:{grid_display}\n재료 요약: {item_name} 제작용"
-                documents.append(Document(page_content=content, metadata={"item": output_item, "type": "정밀조합법"}))
-        
+                output_meta = {**base_meta, "url": f"https://ko.minecraft.wiki/w/{quote(output_item, safe='')}"}
+                documents.append(Document(
+                    page_content=content,
+                    metadata={"item": output_item, "type": "정밀조합법", **output_meta}
+                ))
+
         return documents
     except Exception as e:
         print(f"Error parsing {item_name}: {e}")
@@ -187,7 +210,7 @@ if __name__ == "__main__":
 
     for page in new_pages:
         print(f"[{page}] 파싱 중...")
-        docs = get_full_item_data(page)
+        docs = get_full_item_data(page, category="core_system")
         
         if docs:
             vectorstore.add_documents(docs)
@@ -215,7 +238,7 @@ if __name__ == "__main__":
         
         for item in new_items:
             print(f"[{item}] 파싱 중...")
-            docs = get_full_item_data(item)
+            docs = get_full_item_data(item, category=category)
             
             if docs:
                 vectorstore.add_documents(docs)
