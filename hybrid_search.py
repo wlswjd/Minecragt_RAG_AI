@@ -2,6 +2,7 @@ import re
 import pickle
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
+from reranker import rerank as _rerank
 
 RRF_K = 60
 
@@ -68,8 +69,9 @@ def hybrid_search(
     bm25_data: tuple,
     top_n: int = 30,
     top_k: int = 5,
+    use_rerank: bool = True,
 ) -> list[Document]:
-    """BM25 + Dense → RRF 결합 → LangChain Document 리스트 반환.
+    """BM25 + Dense → RRF 결합 → (선택) Re-ranking → LangChain Document 리스트 반환.
 
     Args:
         query: 사용자 질문
@@ -77,6 +79,7 @@ def hybrid_search(
         bm25_data: load_bm25_index() 가 반환한 (bm25, ids, documents, metadatas) 튜플
         top_n: 각 검색기에서 후보로 뽑을 수 (CLAUDE.md: 30)
         top_k: 최종 반환 문서 수 (CLAUDE.md: 5)
+        use_rerank: True면 Cross-encoder Re-ranking 적용, False면 RRF 순서 그대로 반환
     """
     bm25, ids, documents, metadatas = bm25_data
     idx_to_id = {i: doc_id for i, doc_id in enumerate(ids)}
@@ -105,15 +108,20 @@ def hybrid_search(
         for rank, (doc_id, _) in enumerate(scored[:top_n])
     ]
 
-    # 3. RRF 결합
-    merged_ids = _rrf_combine(dense_results, bm25_results)[:top_k]
+    # 3. RRF 결합 — top_n개까지 확보 (re-ranking 후보)
+    merged_ids = _rrf_combine(dense_results, bm25_results)[:top_n]
 
     # 4. LangChain Document로 변환
-    return [
+    docs = [
         Document(page_content=id_to_doc[doc_id][0], metadata=id_to_doc[doc_id][1])
         for doc_id in merged_ids
         if doc_id in id_to_doc
     ]
+
+    # 5. Re-ranking (use_rerank=False면 RRF 순서 그대로 top_k 반환)
+    if use_rerank:
+        return _rerank(query, docs, top_k=top_k)
+    return docs[:top_k]
 
 
 if __name__ == "__main__":
